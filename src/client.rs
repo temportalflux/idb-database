@@ -41,8 +41,8 @@ impl Client {
 	where
 		V: 'static + Schema + TryFrom<u32, Error = MissingVersion>,
 	{
-		let database = event.database()?;
-		let transaction = event.transaction()?;
+		let database = Self(Arc::new(event.database()?));
+		let transaction = event.transaction()?.map(|t| Transaction(t));
 		// This is always 0 for database initialization, and is otherwise the previous version.
 		let old_version = event.old_version()?;
 		// I've never seen this be None in practice.
@@ -98,7 +98,7 @@ impl Client {
 	}
 }
 
-pub struct Transaction(idb::Transaction);
+pub struct Transaction(pub(crate) idb::Transaction);
 
 impl Transaction {
 	pub async fn commit(self) -> Result<(), Error> {

@@ -20,14 +20,14 @@ impl From<serde_wasm_bindgen::Error> for Error {
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum UpgradeError {
-	#[error("{0}")]
-	Internal(String),
+	#[error(transparent)]
+	Internal(#[from] crate::Error),
 	#[error(transparent)]
 	MissingVersion(#[from] MissingVersion),
 }
 impl From<idb::Error> for UpgradeError {
 	fn from(value: idb::Error) -> Self {
-		Self::Internal(format!("{value:?}"))
+		Self::Internal(value.into())
 	}
 }
 

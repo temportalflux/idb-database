@@ -1,4 +1,4 @@
-use super::super::{Error, Index, IndexType, Record};
+use super::super::{Cursor, Error, Index, IndexType, Record};
 use futures_util::future::LocalBoxFuture;
 use wasm_bindgen::JsValue;
 
@@ -35,6 +35,7 @@ pub trait ObjectStoreExt {
 
 	fn create_index_of<T: IndexType>(&self, params: Option<idb::IndexParams>) -> Result<idb::Index, idb::Error>;
 	fn index_of<T: IndexType>(&self) -> Result<Index<T>, idb::Error>;
+	fn cursor_all<'store, V>(&'store self) -> LocalBoxFuture<'store, Result<Cursor<V>, Error>>;
 }
 
 impl ObjectStoreExt for idb::ObjectStore {
@@ -110,5 +111,12 @@ impl ObjectStoreExt for idb::ObjectStore {
 
 	fn index_of<T: IndexType>(&self) -> Result<Index<T>, idb::Error> {
 		Ok(Index::<T>::from(self.index(T::name())?))
+	}
+
+	fn cursor_all<'store, V>(&'store self) -> LocalBoxFuture<'store, Result<Cursor<V>, Error>> {
+		Box::pin(async move {
+			let cursor = self.open_cursor(None, None).await?;
+			Ok(Cursor::new(cursor))
+		})
 	}
 }

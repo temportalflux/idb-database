@@ -1,6 +1,9 @@
+use crate::Record;
+
 use super::{Error, MissingVersion, Schema, UpgradeError};
 use idb::VersionChangeEvent;
 use std::sync::Arc;
+use wasm_bindgen::JsValue;
 
 pub use idb::TransactionMode;
 
@@ -101,6 +104,30 @@ impl Client {
 pub struct Transaction(pub(crate) idb::Transaction);
 
 impl Transaction {
+	pub async fn put<T: Record>(self, record: &T) -> Result<Self, Error> {
+		self.put_ref(record).await?;
+		Ok(self)
+	}
+
+	pub async fn put_ref<T: Record>(&self, record: &T) -> Result<(), Error> {
+		use crate::{ObjectStoreExt, TransactionExt};
+		let store = self.object_store_of::<T>()?;
+		store.put_record(record).await?;
+		Ok(())
+	}
+
+	pub async fn delete<T: Record>(self, key: impl Into<JsValue>) -> Result<Self, Error> {
+		self.delete_ref::<T>(key).await?;
+		Ok(self)
+	}
+
+	pub async fn delete_ref<T: Record>(&self, key: impl Into<JsValue>) -> Result<(), Error> {
+		use crate::{ObjectStoreExt, TransactionExt};
+		let store = self.object_store_of::<T>()?;
+		store.delete_record(key).await?;
+		Ok(())
+	}
+
 	pub async fn commit(self) -> Result<(), Error> {
 		Ok(self.0.commit().await?)
 	}

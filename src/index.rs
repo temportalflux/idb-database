@@ -14,7 +14,7 @@ impl<T: IndexType> Index<T> {
 	where
 		T::Record: for<'de> Deserialize<'de>,
 	{
-		match self.0.get(params.as_query()?).await? {
+		match self.0.get(params.as_query()?)?.await? {
 			Some(js_value) => Ok(Some(serde_wasm_bindgen::from_value::<T::Record>(js_value)?)),
 			None => Ok(None),
 		}
@@ -24,7 +24,7 @@ impl<T: IndexType> Index<T> {
 	where
 		T::Record: for<'de> Deserialize<'de>,
 	{
-		let js_values = self.0.get_all(Some(params.as_query()?), limit).await?;
+		let js_values = self.0.get_all(Some(params.as_query()?), limit)?.await?;
 		let mut values = Vec::with_capacity(js_values.len());
 		for js_value in js_values {
 			values.push(serde_wasm_bindgen::from_value::<T::Record>(js_value)?);
@@ -40,7 +40,7 @@ impl<T: IndexType> Index<T> {
 			Some(params) => Some(params.as_query()?),
 			None => None,
 		};
-		let cursor = self.0.open_cursor(query, None).await?;
+		let cursor = self.0.open_cursor(query, None)?.await?;
 		let cursor = Cursor::<T::Record>::new(cursor);
 		Ok(cursor)
 	}

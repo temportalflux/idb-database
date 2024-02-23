@@ -47,7 +47,7 @@ impl ObjectStoreExt for idb::ObjectStore {
 		V: Record + serde::de::DeserializeOwned,
 	{
 		Box::pin(async move {
-			let Some(record_js) = self.get(idb::Query::Key(key.into())).await? else {
+			let Some(record_js) = self.get(idb::Query::Key(key.into()))?.await? else {
 				return Ok(None);
 			};
 			Ok(Some(serde_wasm_bindgen::from_value::<V>(record_js)?))
@@ -59,7 +59,7 @@ impl ObjectStoreExt for idb::ObjectStore {
 		key: impl Into<JsValue> + 'store,
 	) -> LocalBoxFuture<'store, Result<(), Error>> {
 		Box::pin(async move {
-			self.delete(idb::Query::Key(key.into())).await?;
+			self.delete(idb::Query::Key(key.into()))?.await?;
 			Ok(())
 		})
 	}
@@ -71,7 +71,7 @@ impl ObjectStoreExt for idb::ObjectStore {
 		Box::pin(async move {
 			let key = record.key().map(|key| JsValue::from(key));
 			let value = record.as_value()?;
-			let _ = self.add(&value, key.as_ref()).await?;
+			let _ = self.add(&value, key.as_ref())?.await?;
 			Ok(())
 		})
 	}
@@ -82,7 +82,7 @@ impl ObjectStoreExt for idb::ObjectStore {
 	{
 		Box::pin(async move {
 			let value = record.as_value()?;
-			let _ = self.put(&value, None).await?;
+			let _ = self.put(&value, None)?.await?;
 			Ok(())
 		})
 	}
@@ -100,7 +100,7 @@ impl ObjectStoreExt for idb::ObjectStore {
 		Box::pin(async move {
 			let value = record.as_value()?;
 			let key = key.into();
-			let _ = self.put(&value, Some(&key)).await?;
+			let _ = self.put(&value, Some(&key))?.await?;
 			Ok(())
 		})
 	}
@@ -115,7 +115,7 @@ impl ObjectStoreExt for idb::ObjectStore {
 
 	fn cursor_all<'store, V>(&'store self) -> LocalBoxFuture<'store, Result<Cursor<V>, Error>> {
 		Box::pin(async move {
-			let cursor = self.open_cursor(None, None).await?;
+			let cursor = self.open_cursor(None, None)?.await?;
 			Ok(Cursor::new(cursor))
 		})
 	}

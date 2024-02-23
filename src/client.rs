@@ -1,7 +1,7 @@
 use crate::Record;
 
 use super::{Error, MissingVersion, Schema, UpgradeError};
-use idb::VersionChangeEvent;
+use idb::event::VersionChangeEvent;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
@@ -44,8 +44,8 @@ impl Client {
 	where
 		V: 'static + Schema + TryFrom<u32, Error = MissingVersion>,
 	{
+		use idb::DatabaseEvent;
 		let database = Self(Arc::new(event.database()?));
-		let transaction = event.transaction()?.map(|t| Transaction(t));
 		// This is always 0 for database initialization, and is otherwise the previous version.
 		let old_version = event.old_version()?;
 		// I've never seen this be None in practice.
@@ -55,7 +55,7 @@ impl Client {
 		// Even if we are initializing fresh, we need to step through all of the versions
 		for version in (old_version + 1)..=new_version {
 			let schema = V::try_from(version)?;
-			schema.apply(&database, transaction.as_ref())?;
+			schema.apply(&database)?;
 		}
 		Ok(())
 	}
@@ -128,8 +128,8 @@ impl Transaction {
 		Ok(())
 	}
 
-	pub async fn commit(self) -> Result<(), Error> {
-		Ok(self.0.commit().await?)
+	pub async fn commit(self) -> Result<idb::TransactionResult, Error> {
+		Ok(self.0.commit()?.await?)
 	}
 }
 

@@ -50,7 +50,7 @@ impl<V> Cursor<V> {
 
 	pub async fn advance(&mut self) -> Result<(), idb::Error> {
 		if let Some(cursor) = &mut self.cursor {
-			cursor.advance(1).await?;
+			cursor.advance(1)?.await?;
 		}
 		Ok(())
 	}
@@ -63,13 +63,13 @@ impl<V> Cursor<V> {
 			return Ok(None);
 		};
 		let js_value = serde_wasm_bindgen::to_value(new_value)?;
-		let js_value = cursor.update(&js_value).await?;
+		let js_value = cursor.update(&js_value)?.await?;
 		Ok(Some(serde_wasm_bindgen::from_value(js_value)?))
 	}
 
 	pub async fn delete_value(&self) -> Result<(), idb::Error> {
 		if let Some(cursor) = &self.cursor {
-			cursor.delete().await?;
+			cursor.delete()?.await?;
 		}
 		Ok(())
 	}
@@ -134,8 +134,8 @@ where
 			// Prime the advance future for the next loop or next time this stream is polled.
 			self.advance = Some(Box::pin(async move {
 				// move the cursor in so this future can have a static lifetime
-				let mut cursor = cursor;
-				cursor.advance(1).await?;
+				let cursor = cursor;
+				cursor.advance(1)?.await?;
 				Ok(cursor)
 			}));
 			// Return the found value, while advancement run in the background.

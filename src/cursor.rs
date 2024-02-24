@@ -137,7 +137,7 @@ where
 				return Poll::Ready(None);
 			}
 		};
-		
+
 		// Prime the advance future for the next loop or next time this stream is polled.
 		self.advance = Some(Box::pin(async move {
 			// move the cursor in so this future can have a static lifetime

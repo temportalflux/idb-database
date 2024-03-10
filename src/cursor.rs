@@ -22,7 +22,7 @@ use std::{pin::Pin, task::Poll};
 pub struct Cursor<V> {
 	cursor: Option<idb::Cursor>,
 	marker: std::marker::PhantomData<V>,
-	advance: Option<Pin<Box<dyn Future<Output = Result<idb::Cursor, idb::Error>>>>>,
+	pending: Option<Pin<Box<dyn Future<Output = Result<(Option<idb::Cursor>, wasm_bindgen::JsValue), idb::Error>>>>>,
 }
 
 impl<V> Cursor<V> {
@@ -30,41 +30,20 @@ impl<V> Cursor<V> {
 		Self {
 			cursor,
 			marker: Default::default(),
-			advance: None,
+			pending: None,
 		}
 	}
 
-	pub fn value(&self) -> Result<Option<V>, Error>
-	where
-		V: for<'de> Deserialize<'de>,
-	{
-		let Some(cursor) = &self.cursor else {
-			return Ok(None);
-		};
-		let value = cursor.value()?;
-		if value.is_null() {
-			return Ok(None);
-		}
-		Ok(Some(serde_wasm_bindgen::from_value::<V>(value)?))
-	}
-
-	pub async fn advance(&mut self) -> Result<(), idb::Error> {
-		if let Some(cursor) = &mut self.cursor {
-			cursor.advance(1)?.await?;
-		}
-		Ok(())
-	}
-
-	pub async fn update_value(&self, new_value: &V) -> Result<Option<V>, Error>
+	pub async fn update_value(&self, new_value: &V) -> Result<(), Error>
 	where
 		V: Serialize + for<'de> Deserialize<'de>,
 	{
 		let Some(cursor) = &self.cursor else {
-			return Ok(None);
+			return Ok(());
 		};
 		let js_value = serde_wasm_bindgen::to_value(new_value)?;
-		let js_value = cursor.update(&js_value)?.await?;
-		Ok(Some(serde_wasm_bindgen::from_value(js_value)?))
+		cursor.update(&js_value)?.await?;
+		Ok(())
 	}
 
 	pub async fn delete_value(&self) -> Result<(), idb::Error> {
@@ -82,71 +61,79 @@ where
 	type Item = V;
 
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
-		// Process any pending advancement future first.
-		// If there is a future here, it means we are waiting for the underlying cursor
-		// to finish advancing before finding the next value.
-		if let Some(mut advance) = self.advance.take() {
-			//log::debug!(target: "cursor", "polling advance");
-			match advance.as_mut().poll(cx) {
-				// the cursor is still advancing, poll the stream later
-				Poll::Pending => {
-					self.advance = Some(advance);
-					return Poll::Pending;
-				}
-				Poll::Ready(Err(idb::Error::CursorAdvanceFailed(_))) => {
-					return Poll::Ready(None);
-				}
-				// advancing found an error, lets assume its the end of stream
-				Poll::Ready(Err(err)) => {
-					log::error!(target: "cursor", "Failed to advance idb::Cursor: {err:?}");
-					return Poll::Ready(None);
-				}
-				// the advancement has finished, we can resume the finding-of-next-value.
-				Poll::Ready(Ok(cursor)) => {
-					//log::debug!(target: "cursor", "cursor advanced completed");
-					self.cursor = Some(cursor);
-				}
-			}
-		}
-
-		// There should ALWAYS be a cursor if we are not advancing and this stream was provided a cursor.
-		// If there is no cursor, then one was not provided by one of the `open_cursor` functions, so the stream is empty.
-		let Some(cursor) = self.cursor.take() else {
-			return Poll::Ready(None);
+		// Find the pending query
+		let mut pending = match self.pending.take() {
+			// existing pending query means an operation took longer than immediate
+			Some(pending) => pending,
+			// the first poll and any poll following a successful first result,
+			// will have an invalid pending in this structure.
+			None => match self.cursor.take() {
+				// an empty cursor on first poll means no elements
+				None => return Poll::Ready(None),
+				// Construct the new pending operation using the stashed cursor.
+				Some(cursor) => Box::pin(async move {
+					// move the cursor in so this future can have a static lifetime
+					let cursor = cursor;
+					// due to changes in idb crate, we must advance to the next entry
+					// before determining if the current entry is not a duplicate (the end of the cursor).
+					let js_value = cursor.value()?;
+					// advance to the next entry
+					let adv_request = cursor.advance(1);
+					// if this causes and advancement failure, then we've reached the end of the cursor
+					if let Err(idb::Error::CursorAdvanceFailed(_)) = &adv_request {
+						return Ok((None, js_value));
+					}
+					// other errors must be bubbled up
+					let adv_request = adv_request?;
+					let adv_request = adv_request.await;
+					// if this causes and advancement failure, then we've reached the end of the cursor
+					if let Err(idb::Error::CursorAdvanceFailed(_)) = &adv_request {
+						return Ok((None, js_value));
+					}
+					// other errors must be bubbled up
+					let cursor = adv_request?;
+					// no errors during advancement, return the current entry and the cursor pointing to the next entry
+					Ok((cursor, js_value))
+				}),
+			},
 		};
 
-		// Cursor exists and there is probably a next value, lets find out.
-		//log::debug!(target: "cursor", "fetching current value");
-		let value = match cursor.value() {
-			Ok(value) => value,
-			Err(err) => {
-				log::error!(target: "cursor", "Failed to get next value in idb::Cursor: {err:?}");
+		// Process any pending advancement future first.
+		// If there is a future here, it means we are waiting for the underlying IDB cursor
+		// to finish advancing before parsing the current value.
+		// This operation may have been from a previous poll, or was just created above.
+		let js_value = match pending.as_mut().poll(cx) {
+			// the cursor is still advancing, poll the stream later
+			Poll::Pending => {
+				self.pending = Some(pending);
+				return Poll::Pending;
+			}
+			// found an error either getting a value or advancing to the next item
+			Poll::Ready(Err(err)) => {
+				log::error!(target: "cursor", "Failed to query next entry from cursor: {err:?}");
 				return Poll::Ready(None);
 			}
+			// we found a value; the next cursor and the current value are provided from the query
+			Poll::Ready(Ok((cursor, value))) => {
+				self.cursor = cursor;
+				value
+			}
 		};
+
 		// Value is empty, so we've reached end-of-stream.
-		if value.is_null() {
+		if js_value.is_null() {
 			return Poll::Ready(None);
 		}
-		//log::debug!(target: "cursor", "found value {:?}", value);
+		//log::debug!(target: "cursor", "found value {:?}", js_value);
+
 		// Parse the valid JSValue as the desired struct type.
-		let value = match serde_wasm_bindgen::from_value::<V>(value) {
+		let value = match serde_wasm_bindgen::from_value::<V>(js_value) {
 			Ok(value) => value,
 			Err(err) => {
 				log::error!(target: "cursor", "Failed to parse database value: {err:?}");
 				return Poll::Ready(None);
 			}
 		};
-
-		// Prime the advance future for the next loop or next time this stream is polled.
-		self.advance = Some(Box::pin(async move {
-			// move the cursor in so this future can have a static lifetime
-			let cursor = cursor;
-			//log::debug!(target: "cursor", "advancing cursor");
-			cursor.advance(1)?.await?;
-			//log::debug!(target: "cursor", "cursor advanced successfully");
-			Ok(cursor)
-		}));
 
 		// Return the found value, while advancement run in the background.
 		return Poll::Ready(Some(value));

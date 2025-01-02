@@ -124,7 +124,6 @@ where
 		if js_value.is_null() {
 			return Poll::Ready(None);
 		}
-		//log::debug!(target: "cursor", "found value {:?}", js_value);
 
 		// Parse the valid JSValue as the desired struct type.
 		let value = match serde_wasm_bindgen::from_value::<V>(js_value) {
